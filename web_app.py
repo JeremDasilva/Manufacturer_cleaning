@@ -56,10 +56,36 @@ def match_percentage(row):
         
         match_percentage = round((match_count / max(len(a), len(b))) * 100, 1)
         
+        if match_percentage >= 75:
+            match_percentage = 100
+        else : 
+            match_percentage = 0
+        
     except :
         match_percentage = 0
         
     return match_percentage
+
+
+def legacy_to_manufacturer_tbd(df_implementation):
+    
+    mask = df_implementation["Manufacturer_implementation"] == "TBD - To Be Determined"
+    if mask.any():
+        df_implementation.loc[mask, "Manufacturer_implementation"] = df_implementation.loc[mask, "Legacy_manufacturer"]
+    
+    return df_implementation
+
+
+def red_tag_counter(df_implementation):
+    
+    df_implementation["Red_tag"] = 0
+    df_implementation.loc[df_implementation["Description"].str.contains("RED TAG", na=False, case=False), "Red_tag"] = 1
+    df_implementation.loc[df_implementation["Mnp_implementation"].str.contains("tbd", na=False, case=False), "Red_tag"] = 1
+    df_implementation.loc[df_implementation["Mnp_implementation"].str.contains("TBD", na=False, case=False), "Red_tag"] = 1
+    df_implementation.loc[df_implementation["Manufacturer_implementation"] == "TBD - To Be Determined", "Red_tag"] = 1
+    
+    return df_implementation[df_implementation["Red_tag"] == 1].shape[0]
+
 
     
 def manufacturer_matching(df_merged):
@@ -100,44 +126,22 @@ def mnp_matching(df_merged):
     return df_merged
 
 
-def manufacturer_improvment(df_client, df_implementation):
-    
-    total_manufacturer_client = df_client[df_client["Item_code"] != None ].shape[0]
-    total_manufacturer_implementation = df_implementation[df_implementation["Item_code"] != None ].shape[0]
-
-    known_manufacturer_client = df_client[df_client["Manufacturer_client"] != "TBD - To Be Determined" ].shape[0]
-    known_manufacturer_implementation = df_implementation[df_implementation["Manufacturer_implementation"] != "TBD - To Be Determined" ].shape[0]
-
-    known_manufacturer_client = round((known_manufacturer_client / total_manufacturer_client) * 100, 0)
-    known_manufacturer_atthemoment = round((known_manufacturer_implementation / total_manufacturer_client) * 100, 0)
-    known_manufacturer_implementation = round((known_manufacturer_implementation / total_manufacturer_implementation) * 100, 0)
-
-    return known_manufacturer_client, known_manufacturer_atthemoment, known_manufacturer_implementation
-
-
-def mnp_improvment(df_client, df_implementation):
-    
-    total_mnp = df_client.shape[0]
-
-    known_mnp_client = df_client[df_client["Mnp_client"] != "TBD - To Be Determined" ].shape[0]
-    known_mnp_implementation = df_implementation[df_implementation["Mnp_implementation"] != "TBD - To Be Determined" ].shape[0]
-
-    known_mnp_client = round((known_mnp_client / total_mnp) * 100, 0)
-    known_mnp_implementation = round((known_mnp_implementation / total_mnp) * 100, 0)
-
-    return known_mnp_client, known_mnp_implementation
-
-
-def improvment(df_match_manuf, df_match_mnp):
-    
-    manufacturer_improved = (df_match_manuf[df_match_manuf["match_manufacturer"] == 0].shape[0])
-    mnp_improved = (df_match_mnp[df_match_mnp["match_mnp"] != 100].shape[0])
-
-    return manufacturer_improved, mnp_improved
-
-
-
 def main(df_client, df_implementation, file_name):
+    
+    items_created = df_implementation[df_implementation["Created_by"].isin(implementers_on_site)].shape[0]    
+    original_items = df_client.shape[0]
+    
+    items_processed = df_implementation.shape[0]
+    
+    df_implementation = legacy_to_manufacturer_tbd(df_implementation)
+    
+    red_tags = red_tag_counter(df_implementation)
+    
+    df_implementation = df_implementation[df_implementation["Manufacturer_implementation"] != "TBD - To Be Determined"]
+    df_implementation.dropna(inplace=True)
+    
+    manufacturer_client = df_client[df_client["Manufacturer_client"] != "TBD - To Be Determined"].shape[0]
+    mnp_client = df_client[~df_client["Mnp_client"].str.contains("tbd", na=False, case=False)].shape[0]
     
     if df_client is not None and df_implementation is not None:
         df_merged = pd.merge(df_client, df_implementation, on="Item_code", how="outer")
@@ -148,21 +152,24 @@ def main(df_client, df_implementation, file_name):
     df_match = pd.merge(df_match_manuf, df_match_mnp, on="Item_code", how="outer")
     df_match.drop(["Mnp_implementation_clean", "Mnp_client_clean", "Manufacturer_client_clean", "Manufacturer_implementation_clean"], axis=1, inplace=True)   
     
-    known_manufacturer_client, known_manufacturer_atthemoment, known_manufacturer_implementation = manufacturer_improvment(df_client, df_implementation)
-    known_mnp_client, known_mnp_implementation = mnp_improvment(df_client, df_implementation)
-    manufacturer_improved, mnp_improved = improvment(df_match_manuf, df_match_mnp)
+    amount_of_manuf_match = df_match[df_match["match_manufacturer"] == 1].shape[0]
+    amount_of_mnp_match = df_match[df_match["match_mnp"] == 100].shape[0]
     
     today_date = datetime.date.today()
     output_file = f'{file_name}_match_{today_date}.xlsx'
     df_match.to_excel(output_file, sheet_name='Results', index=False)
     
     st.markdown(f"""
-    - **{known_manufacturer_client}%** of manufacturers where known.
-    - **{known_manufacturer_atthemoment}%** of the total manufacturers have been provided up to today.
-    - **{known_manufacturer_implementation}%** of implemented manufacturers have been provided.
-    - **{known_mnp_client}%** of MNPs are known where applicable, with **{known_mnp_implementation}%** currently implemented.
-    - We have improved **{manufacturer_improved}** manufacturers and **{mnp_improved}** MNPs.
-    
+    - **{original_items}** items from original data
+        - {manufacturer_client} manufacturers in original datapack
+        - {mnp_client} Mnp in original datapack
+    - **{items_processed}** items have been processed
+    - **{original_items - items_processed}** items remaining
+    - **{items_created}** items have been created
+    - **{red_tags}** red tags
+    - **{amount_of_manuf_match / (items_processed + items_created) }** 
+    - **{amount_of_mnp_match / (items_processed + items_created) }** 
+
     Your excel report has been generated!
     """)
 
@@ -170,39 +177,60 @@ def main(df_client, df_implementation, file_name):
 with st.sidebar:
     st.header('Files Upload')
     
-    uploaded_client_file = st.file_uploader("Drag and drop client file here, or click to browse", type=["xlsx"], key = "client_file" )    
-    uploaded_implementation_file = st.file_uploader("Drag and drop client sync extract here, or click to browse", type=["xlsx"], key = "implementation_file")
+    uploaded_client_file = st.file_uploader("Drag and drop initial file here, or click to browse", type=["xlsx"], key = "client_file" )    
+    uploaded_implementation_file = st.file_uploader("Drag and drop client SYNC extract here, or click to browse", type=["xlsx"], key = "implementation_file")
     df_client = None
     df_implementation = None 
 
     if uploaded_client_file is not None:
         st.write("Client file uploaded successfully!")
         df_client = pd.read_excel(uploaded_client_file, engine='openpyxl')
-        columns_client = df_client.columns
         
+        columns_client = df_client.columns
         columns_client_selected = []
         st.write("Select clients columns:")
+        st.write("You need to select Item number, Manufacturer and MNP in this order.")
         for column in columns_client:
             if st.checkbox(column, key=f"checkbox_{column}"):
                 columns_client_selected.append(column)
-        
-        if columns_client_selected:
-            st.markdown("### Selected Columns")
-            st.write(columns_client_selected)
-        else:
-            st.write("No columns selected.")
-        
-        df_client = df_client[columns_client_selected]
-        df_client.rename(columns={columns_client_selected[0]: "Item_code", columns_client_selected[1]: "Manufacturer_client", columns_client_selected[2]: "Mnp_client"}, inplace=True)
+
+        if len(columns_client_selected) == 3 :
+            df_client = df_client[columns_client_selected]
+            df_client.rename(columns={columns_client_selected[0]: "Item_code", columns_client_selected[1]: "Manufacturer_client", columns_client_selected[2]: "Mnp_client"}, inplace=True)
         
         
     if uploaded_implementation_file is not None:
         st.write("Implementation file uploaded successfully!")
         df_implementation = pd.read_excel(uploaded_implementation_file, engine='openpyxl')
-        df_implementation = df_implementation[["Item", "Manufacturer (Item) (Item)", "Mfr. Part # (Item) (Item)"]]
-        df_implementation.rename(columns={"Item": "Item_code", "Manufacturer (Item) (Item)": "Manufacturer_implementation", "Mfr. Part # (Item) (Item)": "Mnp_implementation"}, inplace=True)
+        df_implementation = df_implementation[["Item", 
+                                               "Manufacturer (Item) (Item)", 
+                                               "Legacy Manufacturer (Item) (Item)", 
+                                               "Mfr. Part # (Item) (Item)", 
+                                               "Description (Item) (Item)", 
+                                               "Modified By (Item) (Item)",
+                                               "Created By"]]
+        df_implementation.rename(columns={"Item": "Item_code", 
+                                          "Manufacturer (Item) (Item)": "Manufacturer_implementation", 
+                                          "Legacy Manufacturer (Item) (Item)" : "Legacy_manufacturer", 
+                                          "Mfr. Part # (Item) (Item)": "Mnp_implementation", 
+                                          "Description (Item) (Item)" : "Description", 
+                                          "Modified By (Item) (Item)" : "Modified_by",
+                                          "Created By" : "Created_by"}, inplace=True)
+        
+        implementers = df_implementation.Modified_by.unique()
+        implementers_on_site = []
+        st.write("Select implementer on site:")
+        for implementer in implementers:
+            if st.checkbox(implementer, key=f"checkbox_{implementer}"):
+                implementers_on_site.append(implementer)
 
-file_name = st.text_input("What is the name of the site?")
-if all(v is not None for v in [df_client, df_implementation]):
-    if st.button("Run"):
-        main(df_client, df_implementation, file_name)
+        if implementers_on_site:
+            df_implementation = df_implementation[df_implementation["Modified_by"].isin(implementers_on_site)]
+
+
+if all(v is not None for v in [df_client, df_implementation]) and len(columns_client_selected) == 3 :
+    file_name = st.text_input("What is the name of the site?")
+    if file_name is not None :
+        if st.button("Run"):
+            main(df_client, df_implementation, file_name)
+            
