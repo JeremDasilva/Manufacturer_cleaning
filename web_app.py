@@ -126,9 +126,8 @@ def mnp_matching(df_merged):
     return df_merged
 
 
-def main(df_client, df_implementation, file_name):
-    
-    items_created = df_implementation[df_implementation["Created_by"].isin(implementers_on_site)].shape[0]    
+def main(df_client, df_implementation, file_name, items_created):
+     
     original_items = df_client.shape[0]
     
     items_processed = df_implementation.shape[0]
@@ -216,21 +215,22 @@ with st.sidebar:
                                           "Description (Item) (Item)" : "Description", 
                                           "Modified By (Item) (Item)" : "Modified_by",
                                           "Created By" : "Created_by"}, inplace=True)
-        
+
         implementers = df_implementation.Modified_by.unique()
         implementers_on_site = []
         st.write("Select implementer on site:")
         for implementer in implementers:
             if st.checkbox(implementer, key=f"checkbox_{implementer}"):
                 implementers_on_site.append(implementer)
+            
+        items_created = df_implementation[df_implementation["Created_by"].isin(implementers_on_site)].shape[0]    
 
         if implementers_on_site:
             df_implementation = df_implementation[df_implementation["Modified_by"].isin(implementers_on_site)]
-
 
 if all(v is not None for v in [df_client, df_implementation]) and len(columns_client_selected) == 3 :
     file_name = st.text_input("What is the name of the site?")
     if file_name is not None :
         if st.button("Run"):
-            main(df_client, df_implementation, file_name)
+            main(df_client, df_implementation, file_name, items_created)
             
